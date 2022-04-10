@@ -1,18 +1,23 @@
 from __future__ import unicode_literals
 
 import hashlib
+
 import logging
+
 from collections import OrderedDict, defaultdict
-from urllib import urlencode
-from urllib2 import quote
-from urlparse import parse_qs, urljoin, urlsplit, urlunsplit
+
+from urllib.parse import urlencode, quote
+from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit
 
 from mopidy import httpclient, models
 
 import requests
 
 import mopidy_emby
+
 from mopidy_emby.utils import cache
+
+from .classes import AAlbum, AArtist, ATrack, ARef
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +31,14 @@ class EmbyHandler(object):
         self.proxy = config['proxy']
         self.user_id = config['emby'].get('user_id', False)
 
-        self.cert = None
-        client_cert = config['emby'].get('client_cert', None)
-        client_key = config['emby'].get('client_key', None)
-        if client_cert is not None and client_key is not None:
-            self.cert = (client_cert, client_key)
-
         # create authentication headers
         self.auth_data = self._password_data()
         self.user_id = self.user_id or self._get_user()[0]['Id']
         self.headers = self._create_headers()
-        self.token = self._get_token()
+
+        self.token =  config['emby']['password']
+
+#self._get_token()
 
         self.headers = self._create_headers(token=self.token)
 
@@ -44,7 +46,7 @@ class EmbyHandler(object):
         """Return user dict from server or None if there is no user.
         """
         url = self.api_url('/Users/Public')
-        r = requests.get(url, cert=self.cert)
+        r = requests.get(url)
         user = [i for i in r.json() if i['Name'] == self.username]
 
         if user:
@@ -56,9 +58,7 @@ class EmbyHandler(object):
         """Return token for a user.
         """
         url = self.api_url('/Users/AuthenticateByName')
-        r = requests.post(
-                url, headers=self.headers, data=self.auth_data, cert=self.cert)
-
+        r = requests.post(url, headers=self.headers, data=self.auth_data)
         return r.json().get('AccessToken')
 
     def _password_data(self):
@@ -66,8 +66,9 @@ class EmbyHandler(object):
         """
         return {
             'username': self.username,
-            'pw': self.password.encode('utf-8'),
             'password': hashlib.sha1(
+                self.password.encode('utf-8')).hexdigest(),
+            'passwordMd5': hashlib.md5(
                 self.password.encode('utf-8')).hexdigest()
         }
 
@@ -77,7 +78,7 @@ class EmbyHandler(object):
         headers = {}
 
         authorization = (
-            'Emby UserId="{user_id}", '
+            'MediaBrowser UserId="{user_id}", '
             'Client="other", '
             'Device="mopidy", '
             'DeviceId="mopidy", '
@@ -87,7 +88,7 @@ class EmbyHandler(object):
         headers['x-emby-authorization'] = authorization
 
         if token:
-            headers['x-mediabrowser-token'] = self.token
+            headers['x-emby-token'] = self.token
 
         return headers
 
@@ -100,13 +101,13 @@ class EmbyHandler(object):
         )
 
         session = requests.Session()
-        session.cert = self.cert
         session.proxies.update({'http': proxy, 'https': proxy})
         session.headers.update({'user-agent': full_user_agent})
 
         return session
 
     def r_get(self, url):
+        logger.debug(url)
         counter = 0
         session = self._get_session()
         session.headers.update(self.headers)
@@ -190,21 +191,71 @@ class EmbyHandler(object):
 
     def get_artists(self):
         music_root = self.get_music_root()
-        artists = sorted(
-            self.get_directory(music_root)['Items'],
+        albums = sorted(
+            self.get_item_type(music_root,'MusicAlbum')['Items'],
             key=lambda k: k['Name']
         )
+        res_artists  = []
+        artist_names = []
+        for album in albums:
+          artists = []
+          artwork = ""
+          if 'Primary' in album['ImageTags']:
+            image_tag = album['ImageTags']['Primary']
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+          else:
+            logger.error(album)
+          for artist in album['AlbumArtists']:
+            if artist['Name'] not in artist_names:
+              res_artists.append(ARef(uri='emby:artist:{}'.format(artist['Id']), name=artist['Name'], artwork=artwork ))
+              artist_names.append( artist['Name'] )
 
-        return [
-            models.Ref.artist(
-                uri='emby:artist:{}'.format(i['Id']),
-                name=i['Name']
-            )
-            for i in artists
-            if i
-        ]
+        return res_artists
+
+
+    def get_albums_list(self):
+       music_root = self.get_music_root()
+       albums = self.get_item_type(music_root,'MusicAlbum')['Items']
+       return [
+          album['Name']
+          for album in albums
+          if album
+       ]
+
+    def get_artists_list(self):
+       music_root = self.get_music_root()
+       artists = self.get_directory(music_root)['Items']
+       return [
+          artist['Name']
+          for artist in artists
+          if artist
+       ]
 
     def get_albums(self, artist_id):
+        music_root = self.get_music_root()
+        albums = self.get_item_type(music_root,'MusicAlbum')['Items']
+        res_albums = []
+        for album in albums:
+          artists = []
+          skip = True
+          for artist in album['ArtistItems']:
+              if artist['Id'] == artist_id:
+                 skip = False
+                 break
+          if skip:
+            continue
+          artwork = ""
+          if 'Primary' not in album['ImageTags']:
+            if 'ParentBackdropImageTags' in album:
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
+          else:
+            image_tag = album['ImageTags']['Primary']
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+
+          res_albums.append(ARef(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artwork=artwork ))
+        return res_albums
+
+
         albums = sorted(
             self.get_directory(artist_id)['Items'],
             key=lambda k: k['Name']
@@ -218,22 +269,56 @@ class EmbyHandler(object):
             if i
         ]
 
+    def list_albums(self):
+        music_root = self.get_music_root()
+        albums = sorted(
+            self.get_item_type(music_root,'MusicAlbum')['Items'],
+            key=lambda k: k['Name']
+        )
+        res_albums  = []
+        for album in albums:
+          artists = []
+          artwork = ""
+          if 'Primary' not in album['ImageTags']:
+            if 'ParentBackdropImageTags' in album:
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
+          else:
+            image_tag = album['ImageTags']['Primary']
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+          for artist in album['AlbumArtists']:
+            artists.append(models.Artist(uri="emby:artist:{}".format(artist['Id']),name=artist['Name']))
+          res_albums.append(AAlbum(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artists=artists,artwork=artwork ))
+        return res_albums
+
+    def list_artists(self):
+        music_root = self.get_music_root()
+        albums = sorted(
+            self.get_item_type(music_root,'MusicAlbum')['Items'],
+            key=lambda k: k['Name']
+        )
+        res_artists  = []
+        for album in albums:
+          artists = []
+          artwork = ""
+          if 'Primary' in album['ImageTags']:
+            image_tag = album['ImageTags']['Primary']
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+          else:
+            logger.error(album)
+          for artist in album['AlbumArtists']:
+            res_artists.append(AArtist(uri='emby:artist:{}'.format(artist['Id']), name=artist['Name'], artwork=artwork ))
+
+        return res_artists
+
     def get_tracks(self, album_id):
         tracks = sorted(
             self.get_directory(album_id)['Items'],
             key=lambda k: k['IndexNumber']
         )
-
-        return [
-            models.Ref.track(
-                uri='emby:track:{}'.format(
-                    i['Id']
-                ),
-                name=i['Name']
-            )
-            for i in tracks
-            if i
-        ]
+        res_tracks = []
+        for track in tracks:
+          res_tracks.append(models.Ref.track(uri='emby:track:{}'.format(track['Id']),name=track['Name']))
+        return res_tracks
 
     @cache()
     def get_directory(self, id):
@@ -249,6 +334,25 @@ class EmbyHandler(object):
                 '/Users/{}/Items?ParentId={}&SortOrder=Ascending'.format(
                     self.user_id,
                     id
+                )
+            )
+        )
+
+    @cache()
+    def get_item_type(self, parent_id, t):
+        """Get directory from Emby API.
+
+        :param id: Directory ID
+        :type id: int
+        :returns Directory
+        :rtype: dict
+        """
+        return self.r_get(
+            self.api_url(
+                '/Users/{}/Items?Recursive=true&SortOrder=Ascending&ParentId={}&IncludeItemTypes={}'.format(
+                    self.user_id,
+                    parent_id,
+                    t
                 )
             )
         )
@@ -281,7 +385,17 @@ class EmbyHandler(object):
         :rtype: mopidy.models.Track
         """
         # TODO: add more metadata
-        return models.Track(
+        artwork = ""
+        if 'Primary' not in track['ImageTags']:
+          if track['AlbumPrimaryImageTag'] != '':
+              artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,track['AlbumId'],track['AlbumPrimaryImageTag'])
+          if 'ParentBackdropImageTags' in track:
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,track['ParentBackdropItemId'],track['ParentBackdropImageTags'][0])
+        else:
+            image_tag = track['ImageTags']['Primary']
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,track['Id'],image_tag)
+
+        return ATrack(
             uri='emby:track:{}'.format(
                 track['Id']
             ),
@@ -290,8 +404,45 @@ class EmbyHandler(object):
             genre=track.get('Genre'),
             artists=self.create_artists(track),
             album=self.create_album(track),
-            length=self.ticks_to_milliseconds(track['RunTimeTicks'])
+            artwork=artwork,
+            length=int(self.ticks_to_milliseconds(track['RunTimeTicks']))
         )
+
+    def create_album_id(self, album_id):
+          music_root = self.get_music_root()
+          albums = self.get_item_type(music_root,'MusicAlbum')['Items']
+          for album in albums:
+            if album['Id'] == album_id:
+              if 'Primary' not in album['ImageTags']:
+                if 'ParentBackdropImageTags' in album:
+                   artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'])
+              else:
+                image_tag = album['ImageTags']['Primary']
+                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+              for artist in album['AlbumArtists']:
+                artists.append(models.Artist(uri="emby:artist:{}".format(artist['Id']),name=artist['Name']))
+              return AAlbum(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artists=artists,artwork=artwork )
+          return None
+
+    def create_artist_name(self, artist_name):
+        music_root = self.get_music_root()
+        albums = self.get_item_type(music_root,'MusicAlbum')['Items']
+        res_artist = None
+        res_albums = []
+        for album in albums:
+          for artist in album['AlbumArtists']:
+            if artist["Name"] == artist_name:
+              if 'Primary' not in album['ImageTags']:
+                if 'ParentBackdropImageTags' in album:
+                   artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'])
+              else:
+                image_tag = album['ImageTags']['Primary']
+                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+              res_albums.append(AAlbum(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artwork = artwork))
+              if res_artist == None:
+                res_artist = AArtist(uri='emby:artist:{}'.format(artist['Id']), name=artist['Name'], artwork=artwork )
+        return res_artist, res_albums
+
 
     def create_album(self, track):
         """Create album object from track.
@@ -314,6 +465,7 @@ class EmbyHandler(object):
         :returns: List of artists
         :rtype: list of mopidy.models.Artist
         """
+        
         return [
             models.Artist(
                 name=artist['Name']
@@ -364,8 +516,19 @@ class EmbyHandler(object):
                 )
             )
         )
-
-        return [i for i in data.get('SearchHints', [])]
+        res_tracks = []
+        res_artists = []
+        res_albums = []
+        for result in data.get('SearchHints'):
+           if result['Type'] == 'MusicArtist':
+              artist,albums = self.create_artist_name(result['Name'])
+              res_artists.append(artist)
+              res_albums.extend(albums)
+           if result['Type'] == 'MusicAlbum':
+              res_albums.append(self.create_album_id(result['Id']))
+           if result['Type'] == 'Audio':
+              res_tracks.append(self.get_track(result['Id']))
+        return res_tracks, res_artists, res_albums
 
     @cache()
     def search(self, query):
@@ -387,66 +550,17 @@ class EmbyHandler(object):
         for itemtype, term in query.items():
 
             for item in term:
-
-                data.extend(
-                    self._get_search(itemtype, item)
-                )
-
-        # walk through all items and create stuff
-        for item in data:
-
-            if item['Type'] == 'Audio':
-
-                track_artists = [
-                    models.Artist(
-                        name=artist
-                    )
-                    for artist in item['Artists']
-                ]
-
-                tracks.append(
-                    models.Track(
-                        uri='emby:track:{}'.format(item['ItemId']),
-                        track_no=item.get('IndexNumber'),
-                        name=item.get('Name'),
-                        artists=track_artists,
-                        album=models.Album(
-                            name=item.get('Album'),
-                            artists=track_artists
-                        )
-                    )
-                )
-
-            elif item['Type'] == 'MusicAlbum':
-                album_artists = [
-                    models.Artist(
-                        name=artist
-                    )
-                    for artist in item['Artists']
-                ]
-
-                albums.append(
-                    models.Album(
-                        uri='emby:album:{}'.format(item['ItemId']),
-                        name=item.get('Name'),
-                        artists=album_artists
-                    )
-                )
-
-            elif item['Type'] == 'MusicArtist':
-                artists.append(
-                    models.Artist(
-                        uri='emby:artist:{}'.format(item['ItemId']),
-                        name=item.get('Name')
-                    )
-                )
-
-        return models.SearchResult(
+                ntracks,nartists,nalbums = self._get_search(itemtype, item)
+                tracks.extend(ntracks)
+                artists.extend(nartists)
+                albums.extend(nalbums)
+        search_res = models.SearchResult(
             uri='emby:search',
             tracks=tracks,
             artists=artists,
             albums=albums
         )
+        return search_res
 
     def lookup_artist(self, artist_id):
         """Lookup all artist tracks and sort them.
@@ -456,32 +570,30 @@ class EmbyHandler(object):
         :returns: List of tracks
         :rtype: list
         """
-        url = self.api_url(
-            (
-                '/Users/{}/Items?SortOrder=Ascending&ArtistIds={}'
-                '&Recursive=true&IncludeItemTypes=Audio'
-            ).format(self.user_id, artist_id)
-        )
+        music_root = self.get_music_root()
+        albums = self.get_item_type(music_root,'MusicAlbum')['Items']
+        res_albums = []
+        for album in albums:
+          artists = []
+          skip = True
+          for artist in album['ArtistItems']:
+              if artist['Id'] == artist_id:
+                 skip = False
+                 break
+          if skip:
+            continue
+          artwork = ""
+          if 'Primary' not in album['ImageTags']:
+            if 'ParentBackdropImageTags' in album:
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
+          else:
+            image_tag = album['ImageTags']['Primary']
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+          for artist in album['AlbumArtists']:
+            artists.append(models.Artist(uri="emby:artist:{}".format(artist['Id']),name=artist['Name']))
+          res_albums.append(ATrack(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artists=artists,artwork=artwork ))
+        return res_albums
 
-        items = self.r_get(url)
-
-        # sort tracks into album keys
-        album_dict = defaultdict(list)
-        for track in items['Items']:
-            album_dict[track['Album']].append(track)
-
-        # order albums in alphabet
-        album_dict = OrderedDict(sorted(album_dict.items()))
-
-        # sort tracks in album dict
-        tracks = []
-        for album, track_list in album_dict.items():
-            track_list.sort(key=lambda k: k['IndexNumber'])
-
-            # add tracks to list
-            tracks.extend(track_list)
-
-        return [self.create_track(i) for i in tracks]
 
     @staticmethod
     def ticks_to_milliseconds(ticks):
