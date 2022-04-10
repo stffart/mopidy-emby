@@ -41,10 +41,12 @@ Before starting Mopidy, you must add configuration for
 Mopidy-Emby to your Mopidy configuration file::
 
     [emby]
-    hostname = Emby server hostname
-    port = Emby server port
-    username = username
-    password = password
+    enabled = true
+    hostname = x.x.x.x
+    port = 8096
+    username = emby
+    password = apikey
+
 
 Its also possible to add a users id with ``user_id = 0``.
 
