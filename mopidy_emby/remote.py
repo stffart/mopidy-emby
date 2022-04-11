@@ -202,7 +202,7 @@ class EmbyHandler(object):
           artwork = ""
           if 'Primary' in album['ImageTags']:
             image_tag = album['ImageTags']['Primary']
-            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
           else:
             logger.error(album)
           for artist in album['AlbumArtists']:
@@ -247,10 +247,10 @@ class EmbyHandler(object):
           artwork = ""
           if 'Primary' not in album['ImageTags']:
             if 'ParentBackdropImageTags' in album:
-               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
           else:
             image_tag = album['ImageTags']['Primary']
-            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
 
           res_albums.append(ARef(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artwork=artwork ))
         return res_albums
@@ -281,10 +281,10 @@ class EmbyHandler(object):
           artwork = ""
           if 'Primary' not in album['ImageTags']:
             if 'ParentBackdropImageTags' in album:
-               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
           else:
             image_tag = album['ImageTags']['Primary']
-            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
           for artist in album['AlbumArtists']:
             artists.append(models.Artist(uri="emby:artist:{}".format(artist['Id']),name=artist['Name']))
           res_albums.append(AAlbum(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artists=artists,artwork=artwork ))
@@ -302,7 +302,7 @@ class EmbyHandler(object):
           artwork = ""
           if 'Primary' in album['ImageTags']:
             image_tag = album['ImageTags']['Primary']
-            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
           else:
             logger.error(album)
           for artist in album['AlbumArtists']:
@@ -317,7 +317,7 @@ class EmbyHandler(object):
         )
         res_tracks = []
         for track in tracks:
-          res_tracks.append(models.Ref.track(uri='emby:track:{}'.format(track['Id']),name=track['Name']))
+          res_tracks.append(self.create_track_ref(track) )
         return res_tracks
 
     @cache()
@@ -387,14 +387,17 @@ class EmbyHandler(object):
         # TODO: add more metadata
         artwork = ""
         if 'Primary' not in track['ImageTags']:
-          if track['AlbumPrimaryImageTag'] != '':
-              artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,track['AlbumId'],track['AlbumPrimaryImageTag'])
+          if 'AlbumPrimaryImageTag' in track:
+            if track['AlbumPrimaryImageTag'] != '':
+                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,track['AlbumId'],track['AlbumPrimaryImageTag'])
           if 'ParentBackdropImageTags' in track:
-               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,track['ParentBackdropItemId'],track['ParentBackdropImageTags'][0])
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,track['ParentBackdropItemId'],track['ParentBackdropImageTags'][0])
         else:
             image_tag = track['ImageTags']['Primary']
-            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,track['Id'],image_tag)
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,track['Id'],image_tag)
 
+        logger.error(track)
+        logger.error(artwork)
         return ATrack(
             uri='emby:track:{}'.format(
                 track['Id']
@@ -408,6 +411,35 @@ class EmbyHandler(object):
             length=int(self.ticks_to_milliseconds(track['RunTimeTicks']))
         )
 
+    def create_track_ref(self, track):
+        """Create track from Emby API track dict.
+
+        :param track: Track from Emby API
+        :type track: dict
+        :returns: Track
+        :rtype: mopidy.models.Track
+        """
+        # TODO: add more metadata
+        artwork = ""
+        if 'Primary' not in track['ImageTags']:
+          if 'AlbumPrimaryImageTag' in track:
+            if track['AlbumPrimaryImageTag'] != '':
+                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,track['AlbumId'],track['AlbumPrimaryImageTag'])
+          if 'ParentBackdropImageTags' in track:
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,track['ParentBackdropItemId'],track['ParentBackdropImageTags'][0])
+        else:
+            image_tag = track['ImageTags']['Primary']
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,track['Id'],image_tag)
+
+        return ARef(
+            uri='emby:track:{}'.format(
+                track['Id']
+            ),
+            type=ARef.TRACK,
+            name=track.get('Name'),
+            artwork=artwork
+        )
+
     def create_album_id(self, album_id):
           music_root = self.get_music_root()
           albums = self.get_item_type(music_root,'MusicAlbum')['Items']
@@ -415,14 +447,32 @@ class EmbyHandler(object):
             if album['Id'] == album_id:
               if 'Primary' not in album['ImageTags']:
                 if 'ParentBackdropImageTags' in album:
-                   artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'])
+                   artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'])
               else:
                 image_tag = album['ImageTags']['Primary']
-                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+              artists = []
               for artist in album['AlbumArtists']:
                 artists.append(models.Artist(uri="emby:artist:{}".format(artist['Id']),name=artist['Name']))
               return AAlbum(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artists=artists,artwork=artwork )
           return None
+
+    def create_artist_id(self, artist_id):
+        music_root = self.get_music_root()
+        albums = self.get_item_type(music_root,'MusicAlbum')['Items']
+        res_artist = None
+        for album in albums:
+          for artist in album['AlbumArtists']:
+            if artist["Id"] == artist_id:
+              artwork = ""
+              if 'Primary' not in album['ImageTags']:
+                if 'ParentBackdropImageTags' in album:
+                   artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'])
+              else:
+                image_tag = album['ImageTags']['Primary']
+                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+              res_artist = AArtist(uri='emby:artist:{}'.format(artist['Id']), name=artist['Name'], artwork=artwork )
+        return res_artist
 
     def create_artist_name(self, artist_name):
         music_root = self.get_music_root()
@@ -434,10 +484,10 @@ class EmbyHandler(object):
             if artist["Name"] == artist_name:
               if 'Primary' not in album['ImageTags']:
                 if 'ParentBackdropImageTags' in album:
-                   artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'])
+                   artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'])
               else:
                 image_tag = album['ImageTags']['Primary']
-                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+                artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
               res_albums.append(AAlbum(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artwork = artwork))
               if res_artist == None:
                 res_artist = AArtist(uri='emby:artist:{}'.format(artist['Id']), name=artist['Name'], artwork=artwork )
@@ -585,10 +635,10 @@ class EmbyHandler(object):
           artwork = ""
           if 'Primary' not in album['ImageTags']:
             if 'ParentBackdropImageTags' in album:
-               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
+               artwork = "{}:{}/emby/Items/{}/Images/Backdrop?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['ParentBackdropItemId'],album['ParentBackdropImageTags'][0])
           else:
             image_tag = album['ImageTags']['Primary']
-            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=200&maxWidth=200&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
+            artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,album['Id'],image_tag)
           for artist in album['AlbumArtists']:
             artists.append(models.Artist(uri="emby:artist:{}".format(artist['Id']),name=artist['Name']))
           res_albums.append(ATrack(uri='emby:album:{}'.format(album['Id']), name=album['Name'], artists=artists,artwork=artwork ))

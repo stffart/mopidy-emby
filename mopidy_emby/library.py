@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class EmbyLibraryProvider(backend.LibraryProvider):
 
-    root_directory = ARef(type=ARef.PLAYLIST, uri='emby:',
+    root_directory = ARef(type=ARef.PLAYLIST, uri='emby:directory:root',
                                           name='Emby', artwork="emby.media/favicon.ico")
 
 
@@ -96,9 +96,24 @@ class EmbyLibraryProvider(backend.LibraryProvider):
         result = dict()
         for uri in uris:
             parts = uri.split(':')
+            if uri.startswith('emby:directory:'):
+              dir_id = parts[-1]
+              if dir_id == 'root':
+                artwork_uri="http://emby.media/favicon.ico"
+                result[uri] = [models.Image(uri=artwork_uri)]
             if uri.startswith('emby:track:') and len(parts) == 3:
               track_id = parts[-1]
               track = self.backend.remote.get_track(track_id)
-              artwork_uri = "http://" + track.artwork.replace("%%", "400x400")
+              artwork_uri = "http://" + track.artwork.replace("%1", "400").replace("%2","400")
+              result[uri] = [models.Image(uri=artwork_uri)]
+            if uri.startswith('emby:album:') and len(parts) == 3:
+              album_id = parts[-1]
+              album = self.backend.remote.create_album_id(album_id)
+              artwork_uri = "http://" + album.artwork.replace("%1", "400").replace("%2","400")
+              result[uri] = [models.Image(uri=artwork_uri)]
+            if uri.startswith('emby:artist:') and len(parts) == 3:
+              artist_id = parts[-1]
+              artist = self.backend.remote.create_artist_id(artist_id)
+              artwork_uri = "http://" + artist.artwork.replace("%1", "400").replace("%2","400")
               result[uri] = [models.Image(uri=artwork_uri)]
         return result
