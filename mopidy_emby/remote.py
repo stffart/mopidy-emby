@@ -306,7 +306,13 @@ class EmbyHandler(object):
           else:
             logger.error(album)
           for artist in album['AlbumArtists']:
-            res_artists.append(AArtist(uri='emby:artist:{}'.format(artist['Id']), name=artist['Name'], artwork=artwork ))
+            found = False
+            for artist_e in res_artists:
+              if artist_e.name == artist['Name']:
+                found = True
+                break
+            if not found:
+              res_artists.append(AArtist(uri='emby:artist:{}'.format(artist['Id']), name=artist['Name'], artwork=artwork ))
 
         return res_artists
 
@@ -396,8 +402,6 @@ class EmbyHandler(object):
             image_tag = track['ImageTags']['Primary']
             artwork = "{}:{}/emby/Items/{}/Images/Primary?maxHeight=%1&maxWidth=%2&tag={}".format(self.hostname,self.port,track['Id'],image_tag)
 
-        logger.error(track)
-        logger.error(artwork)
         return ATrack(
             uri='emby:track:{}'.format(
                 track['Id']
